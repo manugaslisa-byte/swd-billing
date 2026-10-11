@@ -1,0 +1,15 @@
+{
+  "name": "SWD Portable Billing",
+  "short_name": "SWD Billing",
+  "description": "Sindangan Water District portable billing, on-site bill printing and office payment collection",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef3f8",
+  "theme_color": "#0a4a7c",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
