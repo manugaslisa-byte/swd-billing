@@ -1,10 +1,10 @@
 /* sw.js - service worker: makes the app work offline.
    Network first (so updates arrive when online), cached copy when offline. */
-const CACHE = 'swd-billing-v4';
+const CACHE = 'swd-billing-v18';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'css/style.css',
-  'js/storage.js', 'js/billing.js', 'js/printer.js', 'js/csv.js', 'js/views.js', 'js/app.js'
+  'js/storage.js', 'js/billing.js', 'js/printer.js', 'js/csv.js', 'js/datepicker.js', 'js/views.js', 'js/admin.js', 'js/app.js'
 ];
 
 self.addEventListener('install', e => {

@@ -1,7 +1,7 @@
 /* ======================================================================
    csv.js - bulk upload of customers from a CSV file
    Columns: account no., name, address, meter no., meter size, last reading,
-   classification (with or without a header row). In Excel: Save As > CSV.
+   classification, zone 1-9 (with or without a header row). In Excel: Save As > CSV.
    ====================================================================== */
 
 let importPreview = null;          // what the file contains, shown before saving
@@ -51,14 +51,15 @@ function normalizeClassification(text) {
 
 /* Checks every row and sorts them into valid and invalid. Nothing is saved yet. */
 function buildPreview(rows) {
-  let col = { account: 0, name: 1, address: 2, meter: 3, size: 4, reading: 5, classification: 6 };
+  let col = { account: 0, name: 1, address: 2, meter: 3, size: 4, reading: 5, classification: 6, zone: 7 };
   let start = 0;
   const head = rows[0].map(x => x.trim().toLowerCase());
   if (head.some(x => /acc|name|meter|class/.test(x))) {      // first row is a header
     start = 1;
     col = {};
     head.forEach((x, i) => {
-      if (/read|last/.test(x)) col.reading = i;
+      if (/zone|brgy|barangay/.test(x)) col.zone = i;
+      else if (/read|last/.test(x)) col.reading = i;
       else if (/size/.test(x)) col.size = i;
       else if (/meter/.test(x)) col.meter = i;
       else if (/addr/.test(x)) col.address = i;
@@ -77,11 +78,13 @@ function buildPreview(rows) {
     const rowNo = i + 1 + start;
     const account = get('account'), name = get('name').toUpperCase(), meter = get('meter'), reading = get('reading');
     const classification = normalizeClassification(get('classification'));
+    const zone = normalizeZone(get('zone'));
     if (!account || !name || !meter) return invalid.push({ rowNo, reason: 'account no., name and meter no. are required' });
     if (reading !== '' && !/^\d+$/.test(reading)) return invalid.push({ rowNo, reason: 'last reading must be a whole number' });
     if (!classification) return invalid.push({ rowNo, reason: 'unknown classification "' + get('classification') + '"' });
+    if (zone === null) return invalid.push({ rowNo, reason: 'zone must be 1 to 9 (found "' + get('zone') + '")' });
     valid.push({
-      customer: { account, name, address: get('address').toUpperCase(), meter, size: get('size') || '1/2', classification, lastReading: Number(reading) || 0 },
+      customer: { account, name, address: get('address').toUpperCase(), meter, size: get('size') || '1/2', classification, lastReading: hasReading ? Number(reading) : null, zone },
       hasReading: reading !== ''
     });
     customerOf(account) ? existingCount++ : newCount++;
@@ -112,21 +115,22 @@ function applyImport() {
     if (!existing) { DATA.customers.push(customer); added++; }
     else if (importUpdateExisting) {
       Object.assign(existing, { name: customer.name, address: customer.address, meter: customer.meter, size: customer.size, classification: customer.classification });
+      if (customer.zone) existing.zone = customer.zone;
       if (hasReading) existing.lastReading = customer.lastReading;
       updated++;
     } else skipped++;
   });
   const problems = importPreview.invalid.length;
-  saveData();
+  audit('CONSUMERS IMPORTED', 'CSV', `${added} added, ${updated} updated, ${skipped} skipped, ${problems} rejected`);
   importPreview = null;
   render();
   alert(`Import finished: ${added} added, ${updated} updated, ${skipped} skipped (already exist), ${problems} with problems.`);
 }
 
 function downloadTemplate() {
-  const text = 'account_no,name,address,meter_no,meter_size,last_reading,classification\n' +
-               '081-102-003,"DELA CRUZ, JUAN",DATU TANGKILAN SINDANGAN,14120293,1/2,2760,Domestic/Government\n' +
-               '061-102-500,LIM TRADING,PUROK 3 SINDANGAN,14070011,3/4,120,Commercial/Industrial\n';
+  const text = 'account_no,name,address,meter_no,meter_size,last_reading,classification,zone\n' +
+               '081-102-003,"DELA CRUZ, JUAN",DATU TANGKILAN SINDANGAN,14120293,1/2,2760,Domestic/Government,1\n' +
+               '061-102-500,LIM TRADING,PUROK 3 SINDANGAN,14070011,3/4,120,Commercial/Industrial,3\n';
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
   link.download = 'customers_template.csv';

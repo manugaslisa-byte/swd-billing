@@ -14,9 +14,18 @@ const center = text => ' '.repeat(Math.max(0, Math.floor((LINE - text.length) / 
 const row = (left, right) => left + ' '.repeat(Math.max(1, LINE - String(left).length - String(right).length)) + right;
 const rule = '-'.repeat(LINE);
 const wrap = text => text.replace(/(.{1,32})(\s+|$)/g, '$1\n').trim();   // wrap long names
+const formatBillingMonth = bill => {
+  const month = (bill.billingMonth || bill.readingDate || '').slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(month)
+    ? new Date(month + '-01T00:00:00').toLocaleDateString('en', { month: 'long', year: 'numeric' })
+    : month;
+};
 
 /* The printed bill follows the layout of the district's Billing Notice. */
 function billText(bill) {
+  if (!bill || !hasMeterReading(bill.previous)) {
+    throw new Error('Cannot print this bill: a valid previous meter reading is missing.');
+  }
   const c = customerOf(bill.account);
   const cfg = DATA.config;
   const minimum = Math.min(bill.amount, bill.minimumCharge);
@@ -36,6 +45,7 @@ function billText(bill) {
     'ACCOUNT NO.: ' + bill.account,
     'METER NO.: ' + c.meter,
     wrap('CLASS: ' + bill.classification),
+    'BILLING MONTH: ' + formatBillingMonth(bill),
     'PERIOD COVERED:',
     fmtDate(bill.periodFrom) + ' TO ' + fmtDate(bill.readingDate),
     rule,
@@ -88,6 +98,7 @@ function receiptText(payment) {
     wrap(c.name),
     'Account: ' + payment.account,
     'Bill No: ' + payment.billNo,
+    'Billing month: ' + formatBillingMonth(bill),
     rule,
     row('Current billing', money(bill.amount)),
     row('Arrears', money(bill.arrears)),
@@ -109,7 +120,17 @@ function printCard(text) {
     <button class="p" onclick="printBluetooth()">Print via Bluetooth</button>
     <button class="s" onclick="connectPrinter()">Connect printer</button>
     <button class="s" onclick="printBrowser()">Browser print</button>
-    <span id="ps" class="mut"></span></div>`;
+    <p class="printer-status mut" role="status" aria-live="polite"></p>
+    <details class="printer-help">
+      <summary>How to connect a Bluetooth printer</summary>
+      <ol>
+        <li>Turn on the printer, load paper, and enable its Bluetooth/pairing mode.</li>
+        <li>Use Chrome or Microsoft Edge on a device with Bluetooth. Bluetooth printing needs a secure connection (HTTPS or localhost); it may not work when this app is opened as a local file.</li>
+        <li>Select <b>Connect printer</b>, choose the printer in the browser's device chooser, then press <b>Pair</b> or <b>Connect</b> if prompted.</li>
+        <li>When the status says connected, select <b>Print via Bluetooth</b>.</li>
+      </ol>
+      <p class="mut">If the chooser is cancelled or the printer is missing, close it, check power/pairing mode and browser support, then try Connect printer again. Use Browser print as an alternative.</p>
+    </details></div>`;
 }
 
 /* ---------- Bluetooth (BLE) ---------- */
@@ -125,29 +146,43 @@ const PRINTER_SERVICES = [
 
 function bluetoothReady() {
   if (!navigator.bluetooth) {
-    alert('Web Bluetooth is not available here.\nUse Chrome on Android over HTTPS, or use "Browser print".');
+    setPrinterStatus('Bluetooth is not available in this browser or page. Use Chrome or Edge over HTTPS/localhost, or choose Browser print.', true);
     return false;
   }
   return true;
 }
 
+function setPrinterStatus(message, isError = false) {
+  document.querySelectorAll('.printer-status').forEach(status => {
+    status.textContent = message;
+    status.classList.toggle('form-error', isError);
+    status.classList.toggle('mut', !isError);
+  });
+}
+
 async function connectPrinter() {
-  if (!bluetoothReady()) return;
+  if (!bluetoothReady()) return false;
   try {
+    setPrinterStatus('Choose your printer in the browser Bluetooth window. Make sure the printer is on and in pairing mode.');
     const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: PRINTER_SERVICES });
     const server = await device.gatt.connect();
     for (const service of await server.getPrimaryServices()) {
       for (const channel of await service.getCharacteristics()) {
         if (channel.properties.write || channel.properties.writeWithoutResponse) {
           printerChannel = channel;
-          $('#ps').textContent = 'Connected: ' + device.name;
-          return;
+          setPrinterStatus('Connected: ' + (device.name || 'Bluetooth printer') + '. Select Print via Bluetooth.');
+          return true;
         }
       }
     }
     throw new Error('No writable printer channel found');
   } catch (e) {
-    alert('Printer: ' + e.message);
+    if (e.name === 'NotFoundError' || /cancel(l)?ed/i.test(e.message)) {
+      setPrinterStatus('Printer selection was cancelled. No printer was connected. Select Connect printer and choose a device, or open How to connect a Bluetooth printer.');
+      return false;
+    }
+    setPrinterStatus('Could not connect to the printer: ' + e.message + ' Check that it is on, nearby, in pairing mode, and supported by this browser.', true);
+    return false;
   }
 }
 
@@ -156,13 +191,23 @@ async function printBluetooth() {
   if (!bluetoothReady()) return;
   if (!printerChannel) await connectPrinter();
   if (!printerChannel) return;
-  const bytes = new TextEncoder().encode('\x1b@' + $('#pt').textContent + '\n\n\n\n');
-  for (let i = 0; i < bytes.length; i += 100) {            // BLE accepts small blocks
-    const block = bytes.slice(i, i + 100);
-    if (printerChannel.properties.writeWithoutResponse) await printerChannel.writeValueWithoutResponse(block);
-    else await printerChannel.writeValue(block);
+  const preview = document.querySelector('#pt');
+  if (!preview) {
+    setPrinterStatus('No bill or receipt is available to print.', true);
+    return;
   }
-  $('#ps').textContent = 'Printed.';
+  try {
+    const bytes = new TextEncoder().encode('\x1b@' + preview.textContent + '\n\n\n\n');
+    for (let i = 0; i < bytes.length; i += 100) {            // BLE accepts small blocks
+      const block = bytes.slice(i, i + 100);
+      if (printerChannel.properties.writeWithoutResponse) await printerChannel.writeValueWithoutResponse(block);
+      else await printerChannel.writeValue(block);
+    }
+    setPrinterStatus('Printed via Bluetooth.');
+  } catch (e) {
+    printerChannel = null;
+    setPrinterStatus('Could not print: ' + e.message + ' Reconnect the printer and try again.', true);
+  }
 }
 
 function printBrowser() {
@@ -171,4 +216,22 @@ function printBrowser() {
   win.document.write('<pre style="font:12px monospace;width:58mm">' + esc($('#pt').textContent) + '</pre>');
   win.document.close();
   win.print();
+}
+
+/* ---------- full-page printouts (reports, slips) ----------
+   Uses the normal browser print dialog: choose a printer, or "Save as PDF". */
+function printDoc(title, bodyHtml) {
+  let area = document.getElementById('printArea');
+  if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+  area.innerHTML = `<h1>Sindangan Water District</h1><h2>${esc(title)}</h2>
+    <p class="meta">Printed ${new Date().toLocaleString('en-PH')} by ${esc(user ? user.name : '')}</p>${bodyHtml}`;
+  const clear = () => { area.innerHTML = ''; window.removeEventListener('afterprint', clear); };
+  window.addEventListener('afterprint', clear);
+  window.print();
+}
+
+/* a plain table for printouts: head = ['A','B'], rows = [[..],[..]], foot = totals row (optional) */
+function printTable(head, rows, foot) {
+  const line = (cells, tag) => '<tr>' + cells.map(c => `<${tag}>${esc(c)}</${tag}>`).join('') + '</tr>';
+  return `<table class="pt">${line(head, 'th')}${rows.map(r => line(r, 'td')).join('') || `<tr><td colspan="${head.length}">Nothing to show.</td></tr>`}${foot ? line(foot, 'th') : ''}</table>`;
 }
