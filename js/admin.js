@@ -2,7 +2,7 @@
    admin.js - the Settings hub and the screens added on top of the original
    Settings (admin) tabs: Rates & Rules | Staff Accounts | Audit Log | Reports | Backup | My Profile
    Reports   : also a menu item for the Teller and the Cashier
-   My Profile: for every role (own details, change own password, own activity)
+   My Profile: for every role (own details and activity); admin-only password changes
    Also here : login protection (lock-out, idle time-out) and CSV download.
    ====================================================================== */
 
@@ -102,20 +102,23 @@ function setSettingsTab(id) { if (user && user.role === 'admin') { settingsTab =
 
 /* ---------------------------------------------------------- Staff accounts */
 function staffAccountsCards() {
+  if (!user || user.role !== 'admin') {
+    return '<div class="card"><p class="form-error">Only the administrator can manage user accounts.</p></div>';
+  }
   const rows = Object.values(DEFAULT_USERS).map(defaultUser => {
     const account = Object.values(USERS).find(u => u.role === defaultUser.role);
     const info = staffInfo(defaultUser.role);
     const lock = loginLockMinutes(account.username);
     return `<tr><td>${esc(defaultUser.name)}</td>
       <td><input id="username-${defaultUser.role}" autocomplete="off" minlength="5" maxlength="15" value="${esc(account.username)}"></td>
-      <td><div class="password-field settings-password"><input id="password-${defaultUser.role}" type="password" autocomplete="new-password" minlength="8" maxlength="10" placeholder="8–10; blank keeps current"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('password-${defaultUser.role}',this)"><span aria-hidden="true">👁</span></button></div></td>
+      <td><div class="password-field settings-password"><input id="password-${defaultUser.role}" type="password" autocomplete="new-password" minlength="8" maxlength="10" placeholder="8–10; blank keeps current"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('password-${defaultUser.role}',this)">${passwordVisibilityIcon(false)}</button></div></td>
       <td>${info.lastLogin ? esc(fmtDateTime(info.lastLogin)) : '<span class="mut">never</span>'}</td>
       <td>${info.passwordChangedAt ? esc(fmtDateTime(info.passwordChangedAt)) : '<span class="mut">not changed</span>'}</td>
       <td>${lock ? `<span class="tag Unpaid">Locked ${lock} min</span> ${miniButton('Unlock', `unlockAccount('${defaultUser.role}')`)}` : '<span class="tag Paid">Active</span>'}</td></tr>`;
   }).join('');
   return `<div class="card"><h3>Staff accounts</h3>
       <p class="mut">Each role has one account. Username: 5–15 characters. Password: 8–10 characters. Leave the password blank to keep it.
-      Every staff member can also change their own password in <b>My Profile</b>. After ${MAX_ATTEMPTS} wrong passwords a login is locked for ${LOCK_MINUTES} minutes (you can unlock it here).
+      Only the administrator can change staff usernames and passwords here. After ${MAX_ATTEMPTS} wrong passwords a login is locked for ${LOCK_MINUTES} minutes (you can unlock it here).
       Accounts are kept on this device only; this is not a server login. Passwords are never written to the audit log.</p>
       <div class="tw"><table><tr><th>Role</th><th>Username</th><th>New password</th><th>Last login</th><th>Password changed</th><th>Status</th></tr>${rows}</table></div>
       <p id="userSettingsError" class="form-error" role="alert" aria-live="polite"></p>
@@ -230,28 +233,33 @@ function printZoneSummary() {
 VIEWS.profile = () => {
   const account = USERS[user.username];
   const info = staffInfo(user.role);
+  const isAdmin = user.role === 'admin';
   let accepted = null;
   try { accepted = JSON.parse(localStorage.getItem(TERMS_ACCEPTANCE_KEY) || '[]').filter(a => a.username === user.username).pop(); } catch (e) { /* ignore */ }
   const mine = DATA.audit.filter(e => e.user === user.username).slice(-15).reverse()
     .map(e => `<tr><td>${esc(fmtDateTime(e.ts))}</td><td>${esc(e.action)}</td><td>${esc(e.target)}</td><td class="${e.ok ? 'Paid' : 'Unpaid'}">${e.ok ? 'OK' : 'Failed'}</td></tr>`).join('');
-  const pw = (id, label, auto) => `<label for="${id}">${label}</label><div class="password-field"><input id="${id}" type="password" autocomplete="${auto}" minlength="8" maxlength="10" oninput="$('#profileMsg').textContent=''"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('${id}',this)"><span aria-hidden="true">👁</span></button></div>`;
+  const pw = (id, label, auto) => `<label for="${id}">${label}</label><div class="password-field"><input id="${id}" type="password" autocomplete="${auto}" minlength="8" maxlength="10" oninput="$('#profileMsg').textContent=''"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('${id}',this)">${passwordVisibilityIcon(false)}</button></div>`;
   return `<div class="card"><h3>My profile</h3><div class="tw"><table>
       <tr><th>Name</th><td>${esc(user.name)}</td></tr>
-      <tr><th>Role</th><td>${esc(user.role)}</td></tr>
+      <tr><th>Role</th><td>${esc(roleName(user.role))}</td></tr>
       <tr><th>Username</th><td>${esc(account ? account.username : user.username)}</td></tr>
       <tr><th>Previous login</th><td>${info.previousLogin ? esc(fmtDateTime(info.previousLogin)) : '<span class="mut">first login on this device</span>'}</td></tr>
       <tr><th>Password last changed</th><td>${info.passwordChangedAt ? esc(fmtDateTime(info.passwordChangedAt)) : '<span class="mut">not changed</span>'}</td></tr>
       <tr><th>Terms &amp; Privacy Notice</th><td>${accepted ? `accepted ${esc(fmtDateTime(accepted.acceptedAt))} (version ${esc(accepted.version)})` : '<span class="mut">no record</span>'}</td></tr>
     </table></div></div>
-    <div class="card"><h3>Change my password</h3>
+    ${isAdmin ? `<div class="card"><h3>Change my password</h3>
       ${pw('pf0', 'Current password', 'current-password')}${pw('pf1', 'New password (8–10 characters)', 'new-password')}${pw('pf2', 'Repeat new password', 'new-password')}
       <p id="profileMsg" class="form-error" role="alert" aria-live="polite"></p>
-      <button class="p" onclick="changeOwnPassword()">Save new password</button></div>
+      <button class="p" onclick="changeOwnPassword()">Save new password</button></div>` : ''}
     <div class="card"><h3>My recent activity</h3><div class="tw"><table><tr><th>When</th><th>Action</th><th>Target</th><th>Result</th></tr>
       ${mine || '<tr><td colspan="4" class="mut">Nothing yet.</td></tr>'}</table></div></div>`;
 };
 
 function changeOwnPassword() {
+  if (!user || user.role !== 'admin') {
+    appAlert('Only the administrator can change user passwords.');
+    return;
+  }
   const msg = $('#profileMsg');
   const fail = text => { msg.className = 'form-error'; msg.textContent = text; };
   const current = $('#pf0').value, next = $('#pf1').value, again = $('#pf2').value;

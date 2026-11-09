@@ -20,9 +20,9 @@ let loginError = '';
 // What each role may open
 const MENU = {
   admin:   ['dash', 'customers', 'read', 'pay', 'turnover', 'deposit', 'archive', 'records', 'settings'],
-  reader:  ['dash', 'customers', 'read', 'archive', 'records', 'profile'],
-  teller:  ['dash', 'customers', 'pay', 'turnover', 'archive', 'records', 'reports', 'profile'],
-  cashier: ['dash', 'deposit', 'archive', 'records', 'reports', 'profile']
+  reader:  ['dash', 'customers', 'read', 'profile'],
+  teller:  ['dash', 'customers', 'pay', 'turnover', 'profile'],
+  cashier: ['dash', 'deposit', 'profile']
 };
 const TAB_NAMES = {
   dash: 'Dashboard', customers: 'Consumers', read: 'Meter Reading', pay: 'Payments',
@@ -133,6 +133,55 @@ function closeTerms() {
   $('#termsDialog').close();
 }
 
+let appDialogConfirmAction = null;
+
+function showAppDialog(title, message) {
+  const dialog = $('#appDialog');
+  if (!dialog) return;
+  appDialogConfirmAction = null;
+  $('#appDialogCancel').hidden = true;
+  $('#appDialogTitle').textContent = title;
+  $('#appDialogMessage').textContent = message;
+  dialog.showModal();
+}
+
+function appAlert(message, title = 'Notice') {
+  const dialog = $('#appDialog');
+  if (!dialog) {
+    window.alert(message);
+    return;
+  }
+  showAppDialog(title, String(message));
+}
+
+function showAppConfirmation(title, message, onConfirm) {
+  const dialog = $('#appDialog');
+  if (!dialog) return;
+  appDialogConfirmAction = onConfirm;
+  $('#appDialogCancel').hidden = false;
+  $('#appDialogTitle').textContent = title;
+  $('#appDialogMessage').textContent = message;
+  dialog.showModal();
+}
+
+function closeAppDialog() {
+  appDialogConfirmAction = null;
+  const dialog = $('#appDialog');
+  if (dialog && dialog.open) dialog.close();
+}
+
+function confirmAppDialog() {
+  const action = appDialogConfirmAction;
+  closeAppDialog();
+  if (action) action();
+}
+
+function passwordVisibilityIcon(visible) {
+  const eye = '<path d="M2 12s3.6-7 10-7c2.1 0 3.9.7 5.4 1.8M22 12s-3.6 7-10 7c-2.1 0-3.9-.7-5.4-1.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/>';
+  const openEye = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>';
+  return `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${visible ? openEye : eye}</svg>`;
+}
+
 function togglePasswordVisibility(inputId, button) {
   const input = document.getElementById(inputId);
   if (!input) return;
@@ -140,6 +189,7 @@ function togglePasswordVisibility(inputId, button) {
   input.type = visible ? 'text' : 'password';
   button.setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
   button.title = visible ? 'Hide password' : 'Show password';
+  button.innerHTML = passwordVisibilityIcon(visible);
 }
 
 function go(name) {
@@ -194,7 +244,7 @@ function render() {
       <form onsubmit="login(event)" novalidate>
         <label>Username<input id="u" autocomplete="username" minlength="5" maxlength="15" required onkeydown="handleLoginKeydown(event)" oninput="loginError='';$('#loginError').textContent=''"></label>
         <label for="w">Password</label>
-        <div class="password-field login-password"><input id="w" type="password" autocomplete="current-password" minlength="8" maxlength="10" required onkeydown="handleLoginKeydown(event)" oninput="loginError='';$('#loginError').textContent=''"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('w',this)"><span aria-hidden="true">👁</span></button></div>
+        <div class="password-field login-password"><input id="w" type="password" autocomplete="current-password" minlength="8" maxlength="10" required onkeydown="handleLoginKeydown(event)" oninput="loginError='';$('#loginError').textContent=''"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('w',this)">${passwordVisibilityIcon(false)}</button></div>
         <label class="terms-accept"><input id="termsAccepted" type="checkbox" required onchange="loginError='';$('#loginError').textContent=''">
           <span>I have read and agree to the <button type="button" class="terms-link" onclick="openTerms()">Terms &amp; Conditions</button>.</span>
         </label>
@@ -231,7 +281,17 @@ function render() {
   app.innerHTML = `<header><div><b>Sindangan Water District</b><small>${esc(user.name)} | This device only</small></div>
       <div class="header-actions">${installButton()}${backButton}<button onclick="logout()">Log out</button></div></header>
     <nav>${menu}</nav>
-    <main class="${tab === 'records' ? 'records-main' : ''}">${VIEWS[tab]()}</main>`;
+    <main class="${tab === 'records' ? 'records-main' : ''}">${VIEWS[tab]()}</main>
+    <dialog id="appDialog" aria-labelledby="appDialogTitle" onclose="appDialogConfirmAction=null">
+      <div class="app-dialog-content">
+        <h2 id="appDialogTitle"></h2>
+        <p id="appDialogMessage"></p>
+        <div class="app-dialog-actions">
+          <button id="appDialogCancel" type="button" class="s" onclick="closeAppDialog()">Cancel</button>
+          <button type="button" class="p" onclick="confirmAppDialog()">OK</button>
+        </div>
+      </div>
+    </dialog>`;
 }
 
 /* ---------- start ---------- */

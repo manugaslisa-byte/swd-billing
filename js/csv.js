@@ -100,8 +100,8 @@ function readCustomerFile(file) {
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(reader.result); }
     catch (e) { text = new TextDecoder('windows-1252').decode(reader.result); }   // older Excel files
     const rows = parseCSV(text);
-    if (!rows.length) return alert('The file is empty.');
-    try { importPreview = buildPreview(rows); } catch (e) { return alert(e.message); }
+    if (!rows.length) return appAlert('The file is empty.');
+    try { importPreview = buildPreview(rows); } catch (e) { return appAlert(e.message, 'Unable to import consumers'); }
     render();
   };
   reader.readAsArrayBuffer(file);
@@ -124,7 +124,7 @@ function applyImport() {
   audit('CONSUMERS IMPORTED', 'CSV', `${added} added, ${updated} updated, ${skipped} skipped, ${problems} rejected`);
   importPreview = null;
   render();
-  alert(`Import finished: ${added} added, ${updated} updated, ${skipped} skipped (already exist), ${problems} with problems.`);
+  appAlert(`Import finished: ${added} added, ${updated} updated, ${skipped} skipped (already exist), ${problems} with problems.`, 'Import complete');
 }
 
 function downloadTemplate() {

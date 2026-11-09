@@ -11,6 +11,7 @@ const $ = selector => document.querySelector(selector);
 
 // Escape text before putting it inside HTML (prevents broken pages)
 const esc = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const displayAddress = address => String(address || '').replace(/^\s*purok\s+/i, '');
 
 const round2 = n => Math.round(n * 100) / 100;     // keep money to 2 decimals
 const money = n => round2(n).toFixed(2);           // 154 -> "154.00"
@@ -96,7 +97,7 @@ function saveUsers(accounts) {
     loadUsers();
     return true;
   } catch (e) {
-    alert(e.message || 'Could not save user accounts on this device.');
+    appAlert(e.message || 'Could not save user accounts on this device.', 'Unable to save accounts');
     return false;
   }
 }
@@ -207,7 +208,7 @@ function saveData() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
   } catch (e) {
-    alert('Could not save the data on this device.');
+    appAlert('Could not save the data on this device.', 'Unable to save data');
   }
 }
 
@@ -245,13 +246,14 @@ function restoreBackup(file) {
       const data = JSON.parse(reader.result);
       const ok = ['customers', 'bills', 'payments', 'remittances', 'deposits', 'config'].every(k => data[k]);
       if (!ok || !data.config.rates) throw new Error('bad file');
-      if (!confirm('Replace all data on this device with the backup?')) return;
-      DATA = fixOldData(data);
-      saveData();
-      audit('BACKUP RESTORED', 'JSON file');
-      render();
+      showAppConfirmation('Restore backup?', 'Replace all data on this device with the backup?', () => {
+        DATA = fixOldData(data);
+        saveData();
+        audit('BACKUP RESTORED', 'JSON file');
+        render();
+      });
     } catch (e) {
-      alert('That is not a valid backup file.');
+      appAlert('That is not a valid backup file.', 'Unable to restore backup');
     }
   };
   reader.readAsText(file);

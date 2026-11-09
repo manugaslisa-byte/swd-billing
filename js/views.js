@@ -23,7 +23,12 @@ const miniButton = (label, onclick) =>
 let usageMonth = today().slice(0, 7);
 
 /* ---------------------------------------------------------------- Dashboard */
+const roleName = role => role === 'reader' ? 'Meter Reader' : role[0].toUpperCase() + role.slice(1);
+const dashboardLink = (tab, label) => MENU[user.role].includes(tab)
+  ? `<button type="button" class="s" onclick="go('${tab}')">${label}</button>` : '';
+
 VIEWS.dash = () => {
+  const role = user.role;
   const open = DATA.bills.filter(isOpen);
   const outstanding = sumOf(open, b => amountDueOn(b));
   const collected = sumOf(DATA.payments, p => p.amountPaid);
@@ -32,6 +37,52 @@ VIEWS.dash = () => {
   const box = (value, label) => `<div class="st"><b>${value}</b><span>${label}</span></div>`;
   const usageBills = DATA.bills.filter(b => b.readingDate && b.readingDate.slice(0, 7) === usageMonth);
   const totalUsage = sumOf(usageBills, b => Number(b.consumption) || 0);
+  const monthLabel = new Date(usageMonth + '-01T00:00:00').toLocaleDateString('en', { month: 'long', year: 'numeric' });
+  const readAccounts = new Set(usageBills.map(b => b.account));
+  const remainingReads = Math.max(0, DATA.customers.length - readAccounts.size);
+  const quickLinks = links => `<div class="card"><h3>Quick actions</h3>${links.map(([tab, label]) => dashboardLink(tab, label)).join('')}</div>`;
+
+  if (role === 'reader') {
+    return `<div class="card"><h2>${roleName(role)} dashboard</h2><p>Read meters, generate bills, and check the remaining reading workload.</p></div>
+      <div class="card"><h3>Reading progress</h3>
+        <label>Reading month<input type="month" value="${esc(usageMonth)}" onchange="selectUsageMonth(this.value)"></label>
+        <div class="g">
+          ${box(usageBills.length, 'Bills generated in ' + monthLabel)}
+          ${box(remainingReads, 'Consumers without a reading this month')}
+          ${box(totalUsage.toLocaleString() + ' cu.m', 'Usage recorded this month')}
+          ${box(DATA.customers.length, 'Consumers available to read')}
+        </div></div>
+      ${quickLinks([['read', 'Start meter reading'], ['customers', 'View consumers'], ['records', 'View bills and records'], ['archive', 'Check unpaid archive']])}`;
+  }
+
+  if (role === 'teller') {
+    const ownPayments = DATA.payments.filter(p => p.teller === user.name);
+    const ownPending = ownPayments.filter(p => !p.remittanceId);
+    const ownRemittances = DATA.remittances.filter(r => r.teller === user.name);
+    return `<div class="card"><h2>${roleName(role)} dashboard</h2><p>Record consumer payments and turn over collected cash to the cashier.</p></div>
+      <div class="g">
+        ${box(ownPayments.length, 'Payments recorded by you')}
+        ${box(money(sumOf(ownPending, p => p.amountPaid)), 'Cash waiting for turn-over')}
+        ${box(ownRemittances.filter(r => r.status === 'Pending').length, 'Turn-overs awaiting cashier')}
+        ${box(open.length, 'Outstanding bills')}
+      </div>
+      ${quickLinks([['pay', 'Record a payment'], ['turnover', 'Turn over collections'], ['customers', 'Find a consumer'], ['reports', 'Open reports'], ['records', 'View records'], ['archive', 'Check unpaid archive']])}`;
+  }
+
+  if (role === 'cashier') {
+    const pendingRemittances = DATA.remittances.filter(r => r.status === 'Pending');
+    const receivedRemittances = DATA.remittances.filter(r => r.status === 'Received');
+    const depositedTotal = sumOf(DATA.deposits, d => d.amount);
+    return `<div class="card"><h2>${roleName(role)} dashboard</h2><p>Receive cash hand-overs from tellers, reconcile amounts, and record bank deposits.</p></div>
+      <div class="g">
+        ${box(pendingRemittances.length, 'Teller hand-overs to receive')}
+        ${box(money(sumOf(pendingRemittances, r => r.total)), 'Expected cash to receive')}
+        ${box(receivedRemittances.length, 'Received hand-overs to deposit')}
+        ${box(money(depositedTotal), 'Total recorded deposits')}
+      </div>
+      ${quickLinks([['deposit', 'Receive cash / record deposit'], ['reports', 'Open reports'], ['records', 'View records'], ['archive', 'Check unpaid archive']])}`;
+  }
+
   const accountUsage = new Map();
   usageBills.forEach(b => {
     const current = accountUsage.get(b.account) || { account: b.account, name: (customerOf(b.account) || {}).name || '', consumption: 0 };
@@ -47,7 +98,7 @@ VIEWS.dash = () => {
     zoneUsage.set(zone, (zoneUsage.get(zone) || 0) + (Number(b.consumption) || 0));
   });
   const topZones = [...zoneUsage.entries()].sort((a, b) => b[1] - a[1]);
-  const usageLabel = new Date(usageMonth + '-01T00:00:00').toLocaleDateString('en', { month: 'long', year: 'numeric' });
+  const usageLabel = monthLabel;
   const usageSummary = `<div class="card" style="margin-top:14px"><h3>Water usage summary</h3>
       <label>Reading month<input type="month" value="${esc(usageMonth)}" onchange="selectUsageMonth(this.value)"></label>
       <p class="mut">Usage is grouped by the bill reading date, not the exact calendar days water was consumed.</p>
@@ -67,16 +118,18 @@ VIEWS.dash = () => {
           ${topZones.map(([zone, consumption]) => `<tr><td>${esc(zone === 'No zone' ? zone : zoneLabel(zone))}</td><td>${consumption.toLocaleString()} cu.m</td></tr>`).join('') || '<tr><td colspan="2" class="mut">No readings for this month.</td></tr>'}
         </table></div></div>
       </div></div>`;
-  return `<div class="g">
-      ${box(DATA.customers.length, 'Consumers')}
-      ${box(DATA.bills.length, 'Bills generated')}
-      ${box(open.length, 'Outstanding bills')}
+  return `<div class="card"><h2>Administrator dashboard</h2><p>Manage billing operations, staff access, rates, reports, and device backups.</p></div>
+    <div class="g">
+        ${box(DATA.customers.length, 'Consumers')}
+        ${box(DATA.bills.length, 'Bills generated')}
+        ${box(open.length, 'Outstanding bills')}
       ${box(archivedAccounts().length, 'In archive (unpaid)')}
       ${box(money(outstanding), 'Outstanding (PHP)')}
       ${box(money(collected), 'Collected (PHP)')}
       ${box(money(toTurnOver), 'With teller, not turned over')}
       ${box(money(forDeposit), 'With cashier, not deposited')}
     </div>
+    ${quickLinks([['settings', 'Settings and administration'], ['customers', 'Manage consumers'], ['read', 'Meter reading'], ['pay', 'Payments'], ['turnover', 'Turn over'], ['deposit', 'Deposits'], ['archive', 'Unpaid archive'], ['records', 'All records']])}
     ${usageSummary}
     <div class="card" style="margin-top:14px"><h3>Workflow</h3>
       <p><b>1.</b> The meter reader reads the meter, generates the bill, and prints it on site.<br>
@@ -99,7 +152,7 @@ function customerRows(query = '') {
   return DATA.customers
     .filter(c => (c.account + c.name).toLowerCase().includes(q))
     .slice(0, 300)                                     // keep the screen fast
-    .map(c => `<tr><td>${esc(c.account)}</td><td>${esc(c.name)}</td><td>${esc(c.address)}</td><td>${esc(c.meter)}</td><td>${esc(c.classification)}</td><td>${c.connectionStartDate ? fmtDate(c.connectionStartDate) : 'Not set'}</td><td>${hasPreviousReading(c) ? c.lastReading : 'Not set'}</td><td>${miniButton('View records', `viewConsumerRecords('${esc(c.account)}')`)}</td></tr>`)
+    .map(c => `<tr><td>${esc(c.account)}</td><td>${esc(c.name)}</td><td>${esc(displayAddress(c.address))}</td><td>${esc(c.meter)}</td><td>${esc(c.classification)}</td><td>${c.connectionStartDate ? fmtDate(c.connectionStartDate) : 'Not set'}</td><td>${hasPreviousReading(c) ? c.lastReading : 'Not set'}</td><td>${miniButton('View records', `viewConsumerRecords('${esc(c.account)}')`)}</td></tr>`)
     .join('');
 }
 
@@ -183,7 +236,7 @@ function consumerRecordsCard() {
     return `<tr><td>${esc(payment.or)}</td><td>${esc(bill ? billingMonthLabel(bill) : 'Unknown month')}</td><td>${fmtDate(payment.date)}</td><td>${money(payment.amountPaid)}</td><td>${money(payment.balance)}</td><td>${esc(payment.teller)}</td></tr>`;
   }).join('');
   return `<div class="card"><h3>Consumer history: ${esc(c.name)}</h3>
-      <p class="mut">Account ${esc(c.account)} | ${esc(c.address)} | ${esc(c.classification)}</p>
+      <p class="mut">Account ${esc(c.account)} | ${esc(displayAddress(c.address))} | ${esc(c.classification)}</p>
       <button class="s" onclick="closeConsumerRecords()">Back</button>
       ${payAllAction}
       <h3>Monthly bills</h3><div class="tw"><table>
@@ -197,7 +250,7 @@ function consumerRecordsCard() {
 }
 
 function viewConsumerRecords(account) {
-  if (!customerOf(account)) return alert('Consumer not found.');
+  if (!customerOf(account)) return appAlert('Consumer not found.');
   consumerRecordAccount = account;
   render();
 }
@@ -209,8 +262,8 @@ function closeConsumerRecords() {
 
 function payConsumerBill(account, billNo) {
   const bill = DATA.bills.find(b => b.no === billNo && b.account === account && isOpen(b));
-  if (!bill) return alert('That monthly bill is no longer unpaid.');
-  if (!MENU[user.role].includes('pay')) return alert('You do not have permission to record payments.');
+  if (!bill) return appAlert('That monthly bill is no longer unpaid.');
+  if (!MENU[user.role].includes('pay')) return appAlert('You do not have permission to record payments.');
   const c = customerOf(account);
   rememberCurrentPage();
   selected = account;
@@ -229,9 +282,9 @@ function payConsumerBill(account, billNo) {
 
 function payConsumerAll(account) {
   const c = customerOf(account);
-  if (!c) return alert('Consumer not found.');
-  if (!MENU[user.role].includes('pay')) return alert('You do not have permission to record payments.');
-  if (!openBillsOf(account).length) return alert('This consumer has no unpaid monthly bills.');
+  if (!c) return appAlert('Consumer not found.');
+  if (!MENU[user.role].includes('pay')) return appAlert('You do not have permission to record payments.');
+  if (!openBillsOf(account).length) return appAlert('This consumer has no unpaid monthly bills.');
   rememberCurrentPage();
   selected = account;
   selectedBillNo = null;
@@ -368,7 +421,7 @@ function clearConsumerValidation() {
 VIEWS.read = () => {
   const c = selected && customerOf(selected);
   const form = c ? `
-      <p><b>${esc(c.name)}</b> <span class="tag">${esc(c.classification)}</span><br>${esc(c.address)}<br>
+      <p><b>${esc(c.name)}</b> <span class="tag">${esc(c.classification)}</span><br>${esc(displayAddress(c.address))}<br>
       Meter ${esc(c.meter)} | Starting/previous reading: <b>${hasPreviousReading(c) ? c.lastReading : 'Not set'}</b></p>
       ${!DATA.bills.some(b => b.account === c.account) ? '<p class="mut">This is the first bill for this consumer; a previous bill is not required. The saved starting meter reading is used to calculate usage.</p>' : ''}
       ${hasPreviousReading(c) ? `
@@ -425,7 +478,7 @@ function zoneListCard(z) {
   const rows = customersInZone(z).map(c => {
     const bills = openBillsOf(c.account);
     const last = paying ? (bills.length ? bills.length + ' unpaid month(s)' : '<span class="mut">No unpaid bills</span>') : c.lastReading;
-    return `<tr><td>${esc(c.account)}</td><td>${esc(c.name)}</td><td>${esc(c.address)}</td><td>${last}</td>
+    return `<tr><td>${esc(c.account)}</td><td>${esc(c.name)}</td><td>${esc(displayAddress(c.address))}</td><td>${last}</td>
       <td>${miniButton(paying ? 'Select' : 'Read', `selectCustomer('${esc(c.account)}')`)}</td></tr>`;
   }).join('');
   return `<div class="card"><h3>Consumers in ${zoneLabel(z)} (${customersInZone(z).length})</h3><div class="tw"><table>
@@ -436,9 +489,12 @@ function zoneListCard(z) {
 function selectCustomer(text) {
   const t = text.trim().toLowerCase();
   const c = DATA.customers.find(x => x.account.toLowerCase() === t || x.name.toLowerCase() === t);
-  if (!c) alert('Consumer not found.');
+  if (!c) {
+    appAlert('Consumer not found.');
+    return;
+  }
   else if ((tab === 'read' || tab === 'pay') && zoneOf(c) !== currentZone()) {
-    alert(c.name + ' is not in ' + zoneLabel(currentZone()) + '. Change the zone first.');
+    appAlert(c.name + ' is not in ' + zoneLabel(currentZone()) + '. Change the zone first.');
     return;
   }
   selected = c ? c.account : null;
@@ -529,7 +585,7 @@ function validateReadingDate() {
 function submitReading() {
   const c = customerOf(selected);
   if (!hasPreviousReading(c)) {
-    alert('Cannot generate a bill: enter a valid starting meter reading first.');
+    appAlert('Cannot generate a bill: enter a valid starting meter reading first.');
     return;
   }
   const raw = $('#pr').value;
@@ -554,7 +610,7 @@ function submitReading() {
       $('#rd-display').focus();
       return;
     }
-    alert(e.message);
+    appAlert(e.message, 'Unable to generate bill');
   }
 }
 
@@ -630,7 +686,7 @@ function billingMonthLabel(bill) {
 
 function selectBillForPayment(billNo) {
   const bill = DATA.bills.find(b => b.no === billNo && b.account === selected && isOpen(b));
-  if (!bill) return alert('That monthly bill is no longer unpaid.');
+  if (!bill) return appAlert('That monthly bill is no longer unpaid.');
   selectedBillNo = billNo;
   payAllOutstanding = false;
   lastBulkReceipts = [];
@@ -646,7 +702,7 @@ function submitPayment() {
     render();
     const receipt = document.getElementById('paymentReceipt');
     if (receipt) receipt.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (e) { alert(e.message); }
+  } catch (e) { appAlert(e.message, 'Unable to record payment'); }
 }
 
 function submitAllPayments() {
@@ -661,7 +717,7 @@ function submitAllPayments() {
     render();
     const receipt = document.getElementById('paymentReceipt');
     if (receipt) receipt.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (e) { alert(e.message); }
+  } catch (e) { appAlert(e.message, 'Unable to record payment'); }
 }
 
 /* ------------------------------- Turn over collections (teller -> cashier) */
@@ -681,11 +737,22 @@ VIEWS.turnover = () => {
 };
 
 function submitTurnover() {
+  const pending = uncollectedBy(user.name);
+  if (!pending.length) return;
+  const total = sumOf(pending, p => p.amountPaid);
+  showAppConfirmation(
+    'Confirm turn-over',
+    `Turn over PHP ${money(total)} (${pending.length} receipts) to the cashier?`,
+    completeTurnover
+  );
+}
+
+function completeTurnover() {
   try {
     const r = turnOverCollections(user.name);
     render();
-    alert(`Turned over PHP ${money(r.total)} (${r.receipts.length} receipts) to the cashier. Turn-over no. ${r.id}.`);
-  } catch (e) { alert(e.message); }
+    showAppDialog('Turn-over complete', `Turned over PHP ${money(r.total)} (${r.receipts.length} receipts) to the cashier. Turn-over no. ${r.id}.`);
+  } catch (e) { appAlert(e.message, 'Unable to turn over collections'); }
 }
 
 /* --------------------------------- Receive and deposit (the cashier) */
@@ -715,15 +782,31 @@ VIEWS.deposit = () => {
 
 function submitReceive(id) {
   try { receiveRemittance(id, Number($('#cnt-' + id).value), user.name); render(); }
-  catch (e) { alert(e.message); }
+  catch (e) { appAlert(e.message, 'Unable to receive cash'); }
 }
 
 function submitDeposit() {
+  const bank = $('#bk').value.trim();
+  const reference = $('#bs').value.trim();
+  if (!bank || !reference) {
+    showAppDialog('Unable to record deposit', 'Enter the bank and the deposit slip number.');
+    return;
+  }
+  showAppConfirmation(
+    'Confirm deposit details',
+    `Record this deposit at ${bank} using slip no. ${reference}? Check the slip number before confirming.`,
+    () => completeDeposit(bank, reference)
+  );
+}
+
+function completeDeposit(bank, reference) {
   try {
-    const d = recordDeposit({ bank: $('#bk').value.trim(), reference: $('#bs').value.trim(), cashier: user.name });
+    const d = recordDeposit({ bank, reference, cashier: user.name });
     render();
-    alert(`Deposit no. ${d.id} recorded: PHP ${money(d.amount)}.`);
-  } catch (e) { alert(e.message); }
+    showAppDialog('Deposit recorded', `Deposit no. ${d.id} recorded: PHP ${money(d.amount)}.`);
+  } catch (e) {
+    showAppDialog('Unable to record deposit', e.message);
+  }
 }
 
 /* ------------------------------------------------------------------ Archive
@@ -735,7 +818,7 @@ function archiveRows(query = '') {
     .map((a, i) => ({ ...a, rank: i + 1 }))
     .filter(a => (a.customer.account + a.customer.name).toLowerCase().includes(q))
     .slice(0, 300)
-    .map(a => `<tr><td>${a.rank}</td><td>${esc(a.customer.account)}</td><td>${esc(a.customer.name)}</td><td>${esc(a.customer.address)}</td>
+    .map(a => `<tr><td>${a.rank}</td><td>${esc(a.customer.account)}</td><td>${esc(a.customer.name)}</td><td>${esc(displayAddress(a.customer.address))}</td>
       <td>${fmtDate(a.since)}</td><td><b class="Unpaid">${a.days}</b></td><td>${money(a.due)}</td></tr>`).join('');
 }
 
@@ -837,10 +920,10 @@ VIEWS.records = () => {
 function setRecordsTab(name) { recordsTab = name; render(); }
 function reprintBill(no) {
   const bill = DATA.bills.find(b => b.no === no);
-  if (!bill) return alert('Bill not found.');
+  if (!bill) return appAlert('Bill not found.');
   audit('BILL REPRINTED', no);
   try { reprintText = billText(bill); }
-  catch (e) { return alert(e.message); }
+  catch (e) { return appAlert(e.message, 'Unable to reprint bill'); }
   lastReceipt = null;
   render();
   window.scrollTo(0, 0);
@@ -855,12 +938,6 @@ function settingsCards() {
   const head = `<tr><th>Classification</th><th>Minimum</th>${BLOCKS.map(b => `<th>${b.label} cu.m</th>`).join('')}<th>Late %</th></tr>`;
   const rows = k.rates.map((r, i) => `<tr><td>${esc(r.classification)}</td><td>${rateInput('m' + i, r.minimum)}</td>
       ${r.blocks.map((v, j) => `<td>${rateInput(`b${i}_${j}`, v)}</td>`).join('')}<td>${rateInput('l' + i, r.latePercent)}</td></tr>`).join('');
-  const userRows = Object.values(DEFAULT_USERS).map(defaultUser => {
-    const account = Object.values(USERS).find(u => u.role === defaultUser.role);
-    return `<tr><td>${esc(defaultUser.name)}</td>
-      <td><input id="username-${defaultUser.role}" autocomplete="off" minlength="5" maxlength="15" value="${esc(account.username)}"></td>
-      <td><div class="password-field settings-password"><input id="password-${defaultUser.role}" type="password" autocomplete="new-password" minlength="8" maxlength="10" placeholder="8–10; blank keeps current"><button type="button" class="password-toggle" aria-label="Show password" title="Show password" onclick="togglePasswordVisibility('password-${defaultUser.role}',this)"><span aria-hidden="true">👁</span></button></div></td></tr>`;
-  }).join('');
   const ratesHtml = `<div class="card"><h3>Water rates (per classification)</h3>
       <p class="mut">Rates of the Sindangan Water District. The minimum charge covers the first
       ${k.minimumCubicMeters} cu.m; each block is the price per cu.m inside that block.
@@ -871,22 +948,15 @@ function settingsCards() {
         <label>Due after (days)<input id="s4" type="number" value="${k.dueDays}"></label>
         <label>Disconnection after (days)<input id="s5" type="number" value="${k.disconnectionDays}"></label>
       </div><button class="p" onclick="saveSettings()">Save rates</button></div>`;
-  const accountsHtml = `<div class="card"><h3>User accounts</h3>
-      <p class="mut">Admin ra ang maka-usab sa usernames ug passwords. Username: 5–15 ka karakter. Password: 8–10 ka karakter.
-      Biyaan nga blangko ang password kung dili usbon.
-      Kini nga app nagtipig sa accounts niining device/browser lamang; dili kini angay isipon nga secure server authentication.</p>
-      <div class="tw"><table><tr><th>Role</th><th>Username</th><th>New password</th></tr>${userRows}</table></div>
-      <p id="userSettingsError" class="form-error" role="alert" aria-live="polite"></p>
-      <button class="p" onclick="saveUserAccounts()">Save user accounts</button></div>`;
   const backupHtml = `<div class="card"><h3>Backup (this device)</h3>
       <p class="mut">Records are stored on this device. Download a backup regularly, because clearing the browser data erases them.</p>
       <button class="s" onclick="downloadBackup()">Download backup</button>
       <label>Restore from backup file<input type="file" accept=".json" onchange="restoreBackup(this.files[0])"></label></div>`;
-  return { ratesHtml, accountsHtml, backupHtml };
+  return { ratesHtml, backupHtml };
 }
 
 function saveUserAccounts() {
-  if (!user || user.role !== 'admin') return alert('Only the administrator can change user accounts.');
+  if (!user || user.role !== 'admin') return appAlert('Only the administrator can change user accounts.');
   const accounts = {};
   const usernames = new Set();
   for (const defaultUser of Object.values(DEFAULT_USERS)) {
@@ -932,7 +1002,7 @@ function saveUserAccounts() {
   Object.values(DEFAULT_USERS).forEach(d => { if ($('#password-' + d.role) && $('#password-' + d.role).value) staffInfo(d.role).passwordChangedAt = new Date().toISOString(); });
   saveData();
   render();
-  alert('User accounts saved.');
+  appAlert('User accounts saved.');
 }
 
 function saveSettings() {
@@ -947,5 +1017,5 @@ function saveSettings() {
   k.dueDays = Number($('#s4').value);
   k.disconnectionDays = Number($('#s5').value);
   audit('RATES CHANGED', 'rates and rules');
-  alert('Rates saved.');
+  appAlert('Rates saved.');
 }

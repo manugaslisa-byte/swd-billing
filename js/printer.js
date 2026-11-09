@@ -41,7 +41,7 @@ function billText(bill) {
     center('No. ' + bill.no),
     rule,
     wrap('NAME: ' + c.name),
-    wrap('ADDR: ' + c.address),
+    wrap('ADDR: ' + displayAddress(c.address)),
     'ACCOUNT NO.: ' + bill.account,
     'METER NO.: ' + c.meter,
     wrap('CLASS: ' + bill.classification),
@@ -212,7 +212,7 @@ async function printBluetooth() {
 
 function printBrowser() {
   const win = window.open('', '_blank');
-  if (!win) { alert('Allow pop-ups to print.'); return; }
+  if (!win) { appAlert('Allow pop-ups to print.', 'Unable to print'); return; }
   win.document.write('<pre style="font:12px monospace;width:58mm">' + esc($('#pt').textContent) + '</pre>');
   win.document.close();
   win.print();
